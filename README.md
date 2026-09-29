@@ -1,345 +1,202 @@
-# Transcripsoft — Complete Technical Documentation & User Guide
+<div align="center">
 
-**Transcripsoft** is a high-performance, 100% offline, zero-setup desktop application for Windows. It scans any local folder containing video files, extracts and transcribes the speech locally using a bundled Whisper ONNX model and static FFmpeg binary, and compiles the transcriptions into a standardized `transcription.txt` file.
+# Transcripsoft
 
----
+### Local Offline Video Transcriber
 
-## Table of Contents
+*A standalone, zero-dependency desktop application for Windows. Transcribes video collections locally into structured `transcription.txt` documents with zero cloud reliance.*
 
-1. [Executive Overview](#1-executive-overview)
-2. [Core Architecture & Technical Design](#2-core-architecture--technical-design)
-   - [Technology Stack](#technology-stack)
-   - [Architectural Pipeline](#architectural-pipeline)
-   - [Design Decisions & Trade-offs](#design-decisions--trade-offs)
-   - [Directory Structure](#directory-structure)
-3. [Installation & Getting Started](#3-installation--getting-started)
-   - [Option A: Portable Executable (Zero Setup — Recommended)](#option-a-portable-executable-zero-setup--recommended)
-   - [Option B: Running from Source (Developer Mode)](#option-b-running-from-source-developer-mode)
-4. [User Guide & Workflow](#4-user-guide--workflow)
-   - [Step 1: Selecting a Video Folder](#step-1-selecting-a-video-folder)
-   - [Step 2: Video Queue & Live Animations](#step-2-video-queue--live-animations)
-   - [Step 3: Accessing Results & `transcription.txt`](#step-3-accessing-results--transcriptiontxt)
-   - [Real-time Activity Log HUD](#real-time-activity-log-hud)
-5. [Specification of `transcription.txt`](#5-specification-of-transcriptiontxt)
-6. [UI/UX Theme & Visual Aesthetics](#6-uiux-theme--visual-aesthetics)
-7. [Supported Formats & Performance Metrics](#7-supported-formats--performance-metrics)
-8. [Troubleshooting & FAQ](#8-troubleshooting--faq)
-9. [Open to Contributions & Roadmap](#9-open-to-contributions--roadmap)
+<br/>
+
+[![Platform](https://img.shields.io/badge/Platform-Windows%20x64-182020?style=flat-square&logo=windows&logoColor=e2e8e8)](https://github.com/marviecephas/Transcripsoft)
+[![Mode](https://img.shields.io/badge/Architecture-100%25%20Offline-182020?style=flat-square&logoColor=e2e8e8)](https://github.com/marviecephas/Transcripsoft)
+[![Inference](https://img.shields.io/badge/Inference-ONNX%20Runtime%20INT8-182020?style=flat-square&logoColor=e2e8e8)](https://github.com/marviecephas/Transcripsoft)
+[![Speech Model](https://img.shields.io/badge/Model-Whisper%20Tiny-182020?style=flat-square&logoColor=e2e8e8)](https://github.com/marviecephas/Transcripsoft)
+[![Contributions](https://img.shields.io/badge/Contributions-Open-182020?style=flat-square&logoColor=e2e8e8)](https://github.com/marviecephas/Transcripsoft)
+[![License](https://img.shields.io/badge/License-MIT-182020?style=flat-square&logoColor=e2e8e8)](LICENSE)
+
+</div>
 
 ---
 
-## 1. Executive Overview
+## Overview
 
-### The Problem
-Transcribing batches of video tutorials, course lessons, interviews, or lectures usually involves:
-- Uploading large video files to cloud services (slow, privacy risk, recurring API costs, internet dependency).
-- Installing complex Python virtual environments, PyTorch/CUDA wheels, and system PATH dependencies (prone to configuration errors and platform breakage).
+Transcribing batches of video lessons, interviews, presentations, or meetings traditionally requires either sending sensitive audio to cloud servers or setting up heavyweight Python environments with PyTorch, CUDA, and FFmpeg dependencies.
 
-### The Solution: Transcripsoft
-Transcripsoft packages the **entire inference engine, speech model, audio extraction pipeline, and user interface into a single self-contained Windows application**.
+**Transcripsoft** provides a completely self-contained Windows desktop application. All neural inference, speech recognition models, audio demuxers, and runtime libraries are packaged directly within the binary.
 
-- **100% Offline & Private**: Audio and video data never leave the user's computer.
-- **Zero Configuration**: No Python, no Node.js, no FFmpeg installation needed on the target machine.
-- **Ultra-Low Latency**: Uses ONNX Runtime with INT8 quantization, completing short clip inferences in under 450ms on standard CPUs.
-- **Automated Compilation**: Aggregates batch transcriptions directly into a clean `transcription.txt` file saved inside the source video folder.
+- **100% Offline & Private**: Video files and transcribed text never leave your workstation. No telemetry, no cloud APIs, and no internet connection required.
+- **Zero Configuration**: Ready to run upon extraction. Requires no Python, Node.js, or external codec installations.
+- **Sub-Second Latency**: Leverages quantized INT8 ONNX Runtime for rapid speech decoding on standard x64 CPUs.
+- **Automated Document Generation**: Aggregates all video transcripts into a single, standardized `transcription.txt` file placed directly in your source folder.
 
 ---
 
-## 2. Core Architecture & Technical Design
+## Tech Stack
 
-```
-+-------------------------------------------------------------------------+
-|                              ELECTRON UI                                |
-|  [Select Folder] -> [Queue / Shimmer Skeletons] -> [Result Card / Open] |
-+-------------------------------------------------------------------------+
-                                    |
-                            IPC Communication
-                         (preload.js Bridge)
-                                    |
-                                    v
-+-------------------------------------------------------------------------+
-|                         ELECTRON MAIN PROCESS                           |
-|                                                                         |
-|  1. Directory Scanner (Finds all supported video extensions)            |
-|  2. Audio Extraction: Bundled static bin/ffmpeg.exe                     |
-|     - Demux video -> 16kHz mono float32 PCM stream via pipe             |
-|  3. Audio Conversion: wavefile.js (Float32Array buffer)                 |
-|  4. Neural Inference: @xenova/transformers (ONNX Runtime)               |
-|     - Model: models/whisper-tiny.en (Local INT8 Quantized)              |
-|     - allowRemoteModels: false (Strict Offline Guarantee)               |
-|  5. Compiler: Compiles results into folder/transcription.txt            |
-+-------------------------------------------------------------------------+
-```
-
-### Technology Stack
-
-| Layer | Component | Description / Rationale |
+| Component | Framework / Technology | Role & Rationale |
 | :--- | :--- | :--- |
-| **Desktop Shell** | [Electron v31](https://www.electronjs.org/) | Cross-platform desktop runtime providing native file dialogs, system shell integration, and Chromium UI. |
-| **Speech Inference** | [@xenova/transformers](https://github.com/xenova/transformers.js) + [ONNX Runtime](https://onnxruntime.ai/) | CPU/GPU-accelerated neural network inference executing the Whisper speech model in Node.js without Python dependencies. |
-| **Model** | `Xenova/whisper-tiny.en` (INT8 Quantized) | 39M-parameter English speech recognition model (~77 MB), offering high transcription accuracy with minimal RAM and sub-second inference. |
-| **Media Extraction** | Bundled static `ffmpeg.exe` (v8.1.1) | Direct process spawning to demux any video container format and stream raw 16kHz mono WAV chunks via `stdout` pipe. |
-| **Audio Processing** | [`wavefile`](https://github.com/rochars/wavefile) | Converts standard 16-bit WAV PCM chunks into `Float32Array` samples scaled between `[-1.0, 1.0]` required by Whisper. |
-| **Frontend** | HTML5, CSS3 Glassmorphism, Vanilla JS | Custom industrial aesthetic styled with Charleston Green, Dark Grey, Davy's Grey, Aluminium, and Silver. |
+| **Application Runtime** | **Electron v31** | Isolated cross-platform desktop shell with secure IPC architecture |
+| **Neural Execution** | **ONNX Runtime (C++ bindings)** | Low-overhead INT8 neural inference execution on CPU |
+| **Speech Recognition** | **OpenAI Whisper (Tiny.en)** | Quantized 39M-parameter English acoustic model (~77 MB) |
+| **Media Demuxer** | **Static FFmpeg (v8.1.1)** | Direct 16kHz mono audio extraction streamed via memory pipes |
+| **Sample Normalization** | **WaveFile.js** | 16-bit PCM to Float32Array conversion within `[-1.0, 1.0]` |
+| **User Interface** | **HTML5 / CSS3 / Vanilla JS** | Low-latency glassmorphic HUD in Charleston Green & Silver palette |
 
 ---
 
-### Design Decisions & Trade-offs
+## Installation & Usage
 
-1. **Why Transformers.js (ONNX) instead of Python `whisper`?**
-   - *Python Approach*: Requires Python 3.10+, PyTorch (~2GB), CUDA drivers, and `pip` packages. Fragile to transfer across different Windows machines.
-   - *ONNX / Transformers.js Approach*: Compiles directly into native C++ ONNX Runtime binaries via Node.js bindings. The entire model is only ~77 MB, starts instantaneously, and has zero external dependencies.
+Transcripsoft is distributed as a single portable archive (`Transcripsoft.zip`).
 
-2. **Why FFmpeg Streaming Pipe instead of Temporary WAV Files?**
-   - *Temp Files*: Writing large `.wav` files to disk for each video causes SSD wear, disk space errors on full drives, and file lock issues on Windows.
-   - *Pipe Streaming*: FFmpeg outputs directly to standard output (`pipe:1`), received as memory chunks in Node.js buffers and converted directly into `Float32Array`. Disk I/O is reduced to near zero.
+### Option 1: Direct Download (Recommended)
 
-3. **Strict Offline Enforcement (`env.allowRemoteModels = false`)**:
-   - The application explicitly configures `@xenova/transformers` with `env.allowRemoteModels = false` and `env.localModelPath = path.join(__dirname, 'models')`. This prevents any accidental network calls or telemetry.
+1. Download **[`Transcripsoft.zip`](https://github.com/marviecephas/Transcripsoft/raw/main/Transcripsoft.zip)** from this repository.
+2. Right-click the `.zip` file and select **Extract All...**.
+3. Open the unzipped folder and double-click **`Transcripsoft.exe`** to launch.
 
 ---
 
-### Directory Structure
+### Option 2: PowerShell Terminal One-Liner
 
-```
-transcripsoft/
-├── bin/
-│   └── ffmpeg.exe                  # Bundled static FFmpeg Windows binary (64-bit)
-├── models/
-│   └── models--Xenova--whisper-tiny.en/ # Local INT8 quantized Whisper ONNX model
-├── renderer/
-│   ├── index.html                  # Main UI layout (Charleston & Silver theme)
-│   ├── style.css                   # Responsive styles, skeleton animations & equalizer
-│   ├── renderer.js                 # UI event handlers, state transitions & IPC listeners
-│   ├── icon.png                    # Custom Silver & Charleston Studio Microphone (512x512)
-│   └── icon.svg                    # Vector icon master asset
-├── main.js                         # Electron main process, pipeline & file compiler
-├── preload.js                      # Context-isolated secure IPC bridge (window.api)
-├── package.json                    # Project metadata and dependencies
-└── dist/
-    └── Transcripsoft-win32-x64/    # Standalone packaged Windows application
-        ├── Transcripsoft.exe       # Portable double-click executable
-        └── resources/
-            └── app/                # Self-contained assets, models, and node_modules
+Run the following command in PowerShell to automatically download, unpack, and launch the application:
+
+```powershell
+# Download and extract Transcripsoft
+curl.exe -L "https://github.com/marviecephas/Transcripsoft/raw/main/Transcripsoft.zip" -o "$env:USERPROFILE\Downloads\Transcripsoft.zip"
+tar.exe -xf "$env:USERPROFILE\Downloads\Transcripsoft.zip" -C "$env:USERPROFILE\Desktop\Transcripsoft"
+
+# Launch Application
+Start-Process "$env:USERPROFILE\Desktop\Transcripsoft\Transcripsoft.exe"
 ```
 
 ---
 
-## 3. Installation & Getting Started
+## Package Directory Structure
 
-### Option A: Portable Executable (Zero Setup — Recommended)
+The extracted `Transcripsoft` directory contains the complete standalone environment:
 
-No installation, runtime, or terminal is required.
-
-1. **Download/Locate the Package**:
-   - **Direct Folder**: [`C:\Users\user\Desktop\Transcripsoft-win32-x64\`](file:///C:/Users/user/Desktop/Transcripsoft-win32-x64/)
-   - **Portable ZIP**: [`C:\Users\user\Desktop\Transcripsoft-Windows-x64.zip`](file:///C:/Users/user/Desktop/Transcripsoft-Windows-x64.zip)
-2. **Transferring to Another Machine**:
-   - Copy `Transcripsoft-Windows-x64.zip` to a USB flash drive or transfer it over local network/cloud.
-   - On the destination Windows PC (Windows 10 / 11 64-bit), right-click and select **Extract All...**.
-3. **Run**:
-   - Open the folder and double-click **`Transcripsoft.exe`**.
-
----
-
-### Option B: Running from Source (Developer Mode)
-
-If modifying or extending the source code:
-
-1. **Prerequisites**:
-   - Node.js v18+ (tested on Node v22.20.0 x64)
-   - Windows 10/11 (64-bit)
-2. **Clone & Install**:
-   ```powershell
-   cd C:\Users\user\.gemini\antigravity\scratch\transcripsoft
-   npm install
-   ```
-3. **Launch in Dev Mode**:
-   ```powershell
-   npm start
-   ```
-
----
-
-## 4. User Guide & Workflow
-
-### Step 1: Selecting a Video Folder
-1. Launch **Transcripsoft**.
-2. Click the **Choose Folder** button.
-3. Select any directory containing video files on your computer.
-4. The application scans the folder recursively and displays:
-   - The full path of the selected folder.
-   - A badge showing the count of detected video files (e.g. `18 Videos`).
-   - The queue list populated with filenames and file sizes.
-
-### Step 2: Video Queue & Live Animations
-1. Before a folder is chosen, Section 2 displays **animated skeleton placeholder rows** with a liquid shimmer wave, accompanied by an inline bouncing up-arrow (`↑`) prompting the user to select a folder.
-2. Once a folder is loaded, click the **Start Transcribe** button.
-3. Real-time progress is tracked:
-   - **Header Equalizer**: A 5-band animated audio equalizer pulses during active speech transcription.
-   - **Individual Progress Bars**: Moves from `Extracting audio (25%)` -> `Transcribing speech (65%)` -> `Done (100%)`.
-   - **Overall Progress Bar**: Displays cumulative batch percentage with a liquid metallic shimmer sweep.
-   - **Status Badges**: Transitions from `PENDING` -> `ACTIVE` -> `DONE`.
-4. If needed, click the red **Cancel** button at any time to halt processing safely.
-
-### Step 3: Accessing Results & `transcription.txt`
-1. When all files finish, the **Success Result Card** appears with sound feedback and a glowing silver badge.
-2. Two one-click quick actions are available:
-   - **Open transcription.txt**: Opens the compiled text file in Windows Notepad (or your default text editor).
-   - **Open Folder**: Opens the source video folder in Windows File Explorer.
-3. A live formatted preview of the generated transcription is visible directly inside the app.
-
-### Real-time Activity Log HUD
-The collapsible **Activity Log** drawer at the bottom provides timestamped execution logs:
-```text
-[02:16:09 PM] Selected folder: C:\...\CSS NEW RE-EDITED with 18 videos
-[02:17:07 PM] Starting transcription for 18 video(s)...
-[02:17:07 PM] Initializing local transcription engine...
-[02:17:08 PM] Engine ready (Whisper Tiny - 100% Offline).
-[02:17:08 PM] [1/18] Extracting audio: Lesson 1.mp4...
-[02:17:09 PM] [1/18] Transcribing speech: Lesson 1.mp4...
-[02:17:09 PM] [1/18] Completed Lesson 1.mp4 in 412ms -> "Welcome to the course..."
-[02:17:10 PM] Compiling transcriptions into transcription.txt...
-[02:17:10 PM] Saved: C:\...\CSS NEW RE-EDITED\transcription.txt
+```
+Transcripsoft/
+├── Transcripsoft.exe          # Main application executable (Double-click to run)
+├── resources/
+│   └── app/                   # Self-contained application bundle
+│       ├── bin/
+│       │   └── ffmpeg.exe     # Bundled static FFmpeg media processor
+│       ├── models/            # Bundled Whisper ONNX INT8 speech model
+│       ├── node_modules/      # Embedded ONNX Runtime & Transformers engine
+│       ├── renderer/          # Dark metallic UI, fonts, styling, and icon assets
+│       │   ├── icon.png       # Silver & Charleston Studio Microphone app icon
+│       │   ├── icon.svg       # Vector icon source
+│       │   ├── index.html     # Application interface structure
+│       │   ├── style.css      # Dark metallic styling & animations
+│       │   └── renderer.js    # Interface controller & IPC handlers
+│       ├── main.js            # Electron background engine & file compiler
+│       ├── preload.js         # Context-isolated security bridge
+│       └── package.json       # Metadata & engine dependencies
+├── locales/                   # Multi-language interface packages
+├── chrome_100_percent.pak     # Chromium visual interface resource pack
+├── chrome_200_percent.pak     # High-DPI UI scaling bundle
+├── resources.pak              # Chromium core resource package
+├── icudtl.dat                 # Unicode internationalization data library
+├── snapshot_blob.bin          # V8 JavaScript snapshot cache
+├── v8_context_snapshot.bin    # Pre-compiled V8 execution context
+├── d3dcompiler_47.dll         # Direct3D shader compiler for hardware acceleration
+├── ffmpeg.dll                 # Internal audio decoding library
+├── libEGL.dll                 # Embedded graphics library rendering interface
+├── libGLESv2.dll              # OpenGL ES 2.0 graphics acceleration library
+├── vk_swiftshader.dll         # High-performance software Vulkan rasterizer
+├── vk_swiftshader_icd.json    # Vulkan driver configuration metadata
+├── vulkan-1.dll               # Vulkan graphics runtime loader
+├── LICENSES.chromium.html     # Open-source license acknowledgments
+└── README.md                  # Project documentation & user guide
 ```
 
 ---
 
-## 5. Specification of `transcription.txt`
+## Workflow & Features
 
-The output file `transcription.txt` is automatically compiled and saved in the root of the chosen folder. It uses a clean delimiter structure optimized for downstream LLM prompts, document summaries, indexing, and human reading.
+```
+[ Step 1: Select Folder ]
+          │
+          ▼
+[ Step 2: Real-time Queue ] ──► (Animated Wireframe Skeletons / Bouncing Guide Arrow)
+          │
+          ├──► FFmpeg Extracts 16kHz Mono Stream via Memory Pipe
+          ├──► WaveFile converts PCM -> Float32Array Samples
+          └──► ONNX Runtime executes Whisper Tiny (Offline INT8)
+          │
+          ▼
+[ Step 3: Success Result ]  ──► Automatically saves 'transcription.txt' in video folder
+```
 
-### Format Structure
+1. **Folder Scan**: Select any folder containing video files (`.mp4`, `.mkv`, `.avi`, `.mov`, `.webm`, `.flv`, `.wmv`, etc.).
+2. **Dynamic Queue HUD**:
+   - **Wireframe Skeleton Rows**: Displays animated placeholder rows with a liquid shimmer wave prior to folder selection.
+   - **Inline Bouncing Guide (`↑`)**: A subtle metallic silver arrow guides the user to select a folder from Step 1.
+   - **Live 5-Band Audio Equalizer**: An animated wave visualizer pulses during active transcription.
+   - **Real-Time Progress**: Individual file progress bars and overall batch percentage indicators.
+3. **Automated Export**: Generates `transcription.txt` inside the selected folder and displays a live in-app preview with quick-open buttons.
+
+---
+
+## Output Specification: `transcription.txt`
+
+Transcripts are written to `transcription.txt` in the root of the selected video folder with clear header delimiters:
 
 ```text
 ========================================
-FILE: <filename_1.mp4>
+FILE: 01_introduction_and_setup.mp4
 ========================================
-<Transcribed speech text>
+Welcome to the course. In this first lesson, we will cover the initial environment setup.
 
 ========================================
-FILE: <filename_2.mp4>
+FILE: 02_core_architecture.mp4
 ========================================
-<Transcribed speech text>
-```
-
-### Real Example Output
-
-```text
-========================================
-FILE: speech_off.mp4
-========================================
-speech off
-
-========================================
-FILE: speech_on.mp4
-========================================
-speech on
-
-========================================
-FILE: speech_sleep.mp4
-========================================
-Speech Sleep
+Now let's explore the core architectural patterns and state management structure.
 ```
 
 > [!NOTE]
-> If a video has no spoken dialogue (e.g. background music or silence), Transcripsoft records `(No speech detected)` rather than failing or crashing.
+> If a video file contains no spoken audio (e.g. background music or silence), the application writes `(No speech detected)` and continues processing the queue without interruption.
 
 ---
 
-## 6. UI/UX Theme & Visual Aesthetics
+## Color Palette & Theme
 
-Transcripsoft features a dark metallic aesthetic built around a dedicated industrial color palette:
+The user interface is built on a dark industrial palette:
 
-| Color Name | Hex Code | Role in the Application |
-| :--- | :--- | :--- |
-| **Charleston Green** | `#182020` / `#0c1010` | Atmospheric background radial gradient, table header bars, and squircle icon base. |
-| **Dark Grey** | `#121616` / `#141919` | Frosted card containers, input displays, and console drawer. |
-| **Davy's Grey** | `#505858` / `#323c3c` | Hairline panel borders, divider lines, and muted placeholder text. |
-| **Nickel** | `#6e7878` / `#848e8e` | Secondary metadata labels, step badge outlines, and scrollbar thumb states. |
-| **Aluminium** | `#9aa4a4` / `#b0baba` | Button borders, progress bar tracks, and table column titles. |
-| **Silver** | `#ffffff` / `#e2e8e8` | Radiant metallic **Start Transcribe** button, brand title, active progress beam, and Chrome Studio Microphone icon. |
-
----
-
-## 7. Supported Formats & Performance Metrics
-
-### Supported Video Containers & Codecs
-Transcripsoft demuxes all major video formats supported by FFmpeg:
-
-| Format Extension | Container / Codec |
-| :--- | :--- |
-| `.mp4`, `.m4v` | MPEG-4 Part 14 / H.264, H.265 (HEVC), AV1 |
-| `.mkv` | Matroska Multimedia Container |
-| `.avi` | Audio Video Interleave |
-| `.mov` | Apple QuickTime Movie |
-| `.webm` | WebM / VP8, VP9, AV1 |
-| `.flv` | Flash Video |
-| `.wmv` | Windows Media Video |
-| `.mpeg`, `.mpg` | MPEG-1 / MPEG-2 Video |
-| `.3gp` | 3GPP Multimedia File |
+| Swatch | Color Name | Hex Code | Role |
+| :---: | :--- | :--- | :--- |
+| ![#182020](https://img.shields.io/badge/-%23182020-182020?style=flat-square) | **Charleston Green** | `#182020` | Base atmospheric background radial gradient & table headers |
+| ![#121616](https://img.shields.io/badge/-%23121616-121616?style=flat-square) | **Dark Grey** | `#121616` | Card panels, input displays, and console HUD |
+| ![#505858](https://img.shields.io/badge/-%23505858-505858?style=flat-square) | **Davy's Grey** | `#505858` | Hairline borders, dividers, and skeleton animation base |
+| ![#6e7878](https://img.shields.io/badge/-%236e7878-6e7878?style=flat-square) | **Nickel** | `#6e7878` | Metadata labels, step badge outlines, and scrollbars |
+| ![#9aa4a4](https://img.shields.io/badge/-%239aa4a4-9aa4a4?style=flat-square) | **Aluminium** | `#9aa4a4` | Button borders, progress tracks, and table headers |
+| ![#ffffff](https://img.shields.io/badge/-%23ffffff-ffffff?style=flat-square) | **Silver** | `#ffffff` | Primary button, brand text, progress beam, and app icon |
 
 ---
 
-### Latency & Resource Benchmarks
+## Open to Contributions & Roadmap
 
-*Tested on standard Intel Core i7 / AMD Ryzen CPU (No discrete GPU required):*
+**Transcripsoft is open to contributions.** We welcome pull requests, optimizations, bug reports, and feature proposals.
 
-| Metric | Measured Value |
-| :--- | :--- |
-| **Model Load Time (Warmup)** | ~650 ms (one-time on app launch) |
-| **Audio Extraction Time** | 40 ms – 120 ms per minute of video |
-| **Speech Inference Latency** | **350 ms – 450 ms** per 10-second segment |
-| **Peak RAM Usage** | ~280 MB (Electron UI + ONNX Runtime combined) |
-| **Disk Footprint (Uncompressed)** | ~619 MB (includes Chromium, ONNX, Model, FFmpeg) |
-| **Portability Size (ZIP)** | ~147 MB |
+### Planned Roadmap
+- [ ] **Multilingual Speech Models**: Support for multilingual Whisper checkpoints (`whisper-base`, `whisper-small`, or multilingual ONNX models) with an in-app language dropdown.
+- [ ] **Subtitle Generators**: Automated export of `.srt` and `.vtt` timestamped subtitle files alongside `transcription.txt`.
+- [ ] **DirectML / WebGPU GPU Acceleration**: Support for GPU execution providers in ONNX Runtime for accelerated transcription.
+- [ ] **Pure Audio Ingestion**: Scanner support for `.mp3`, `.wav`, `.m4a`, `.aac`, `.flac`, and `.ogg` files.
+- [ ] **Speaker Diarization & Timestamps**: Segment transcripts with speaker turn detection (`[00:01:23] Speaker 1: ...`).
 
----
-
-## 8. Troubleshooting & FAQ
-
-### Q1: Does Transcripsoft require an internet connection?
-**No.** Transcripsoft is 100% offline. The speech model (`whisper-tiny.en`), neural inference runtime (`onnxruntime-node`), and media extractor (`ffmpeg.exe`) are bundled locally inside the application folder.
-
-### Q2: What happens if a video contains background noise or silence?
-Whisper's voice activity detection filters out silent frames. If no speech is detected, it outputs `(No speech detected)` and continues processing the next video in the queue without interrupting the batch.
-
-### Q3: Can I run this on a PC that doesn't have Node.js or admin rights?
-**Yes.** The portable executable in `Transcripsoft-win32-x64` is self-contained and does not require administrator privileges, Node.js, Python, or PATH modifications.
-
-### Q4: Can I cancel a batch halfway through?
-**Yes.** Clicking the **Cancel** button immediately stops the active FFmpeg child process and terminates remaining queue items gracefully without corrupting previously transcribed files.
+### Contributing
+1. Fork the repository and create your branch (`git checkout -b feature/your-feature-name`).
+2. Adhere to existing code conventions, keep dependencies zero-setup, and preserve the 100% offline guarantee.
+3. Test locally using `npm start`.
+4. Open a Pull Request with a clear summary of your changes.
 
 ---
 
-## 9. Open to Contributions & Roadmap
+## License & Acknowledgments
 
-**Transcripsoft is completely open to contributions!** We welcome issues, feature suggestions, optimizations, and pull requests from developers, designers, AI practitioners, and audio engineers.
-
-### 💡 Potential Areas for Contribution & Roadmap Ideas
-
-- **Multi-Language Speech Models**: Adding support for multilingual Whisper checkpoints (`whisper-base`, `whisper-small`, or quantized multilingual ONNX models) with an in-app language selector.
-- **Subtitle Export Formats**: Adding automated `.srt` and `.vtt` timestamped subtitle generators alongside `transcription.txt`.
-- **DirectML / WebGPU Acceleration**: Adding GPU execution providers for accelerated neural inference on Windows machines with dedicated NVIDIA/AMD/Intel GPUs.
-- **Standalone Audio Ingestion**: Extending scanner support to pure audio containers (`.mp3`, `.wav`, `.m4a`, `.aac`, `.flac`, `.ogg`).
-- **Speaker Diarization & Timestamps**: Enhancing transcript outputs with speaker turn detection and granular timestamps (`[00:01:23] ...`).
-
-### 🛠️ How to Contribute
-
-1. **Fork the Repository**: Clone your fork locally to your workstation.
-2. **Create a Feature Branch**:
-   ```powershell
-   git checkout -b feature/your-feature-name
-   ```
-3. **Make Your Changes**: Keep dependencies minimal, adhere to the Charleston Green / Dark Grey / Silver design theme, and preserve the 100% offline guarantee.
-4. **Test Locally**:
-   ```powershell
-   npm start
-   ```
-5. **Submit a Pull Request**: Provide a clear description of your changes, rationale, and testing steps.
-
----
-
-## License & Credits
-- **Built with**: Electron, Transformers.js (Apache-2.0), ONNX Runtime (MIT), FFmpeg (LGPL/GPL).
-- **Speech Model**: OpenAI Whisper (MIT).
+- **License**: MIT License. See [LICENSE](LICENSE) for details.
+- **Dependencies**: Electron, Transformers.js, ONNX Runtime, and static FFmpeg.
+- **Speech Model**: OpenAI Whisper.
